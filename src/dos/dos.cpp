@@ -1931,6 +1931,7 @@ static Bitu DOS_21Handler(void) {
 		{
             unmask_irq0 |= disk_io_unmask_irq0;
             MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
+            { extern void civzh_dump(void); PhysPt sp = SegPhys(ss) + reg_sp; LOG_MSG("CIVZH: open %s from %04X:%04X ds:dx=%04X:%04X", name1, mem_readw(sp + 2), mem_readw(sp), SegValue(ds), reg_dx); if (strstr(name1, "iconpg")) civzh_dump(); }
 #if !defined(OSFREE)
 # if defined(USE_TTF)
             if((IS_DOSV || ttf_dosv) && IS_DOS_JAPANESE) {

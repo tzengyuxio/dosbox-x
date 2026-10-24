@@ -1,3 +1,5 @@
+#include <mutex>
+#include <deque>
 /*
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
@@ -740,6 +742,24 @@ void MAPPER_TriggerEvent(const CEvent *event, const bool deactivation_state) {
  *       std::thread.
  *
  *       Replace thread with PIC_AddEvent() to callback. */
+/* civ-zh harness: the typist thread must not touch the PIC queue, so it
+ * only queues bind changes; the main thread applies them in
+ * CIVZH_DrainKeys() from CIVZH_PollControl(). */
+static std::mutex civzh_key_mutex;
+static std::deque<std::pair<CEvent*, bool>> civzh_key_queue;
+static void CIVZH_QueueKey(CEvent *event, bool pressed) {
+	std::lock_guard<std::mutex> lock(civzh_key_mutex);
+	civzh_key_queue.emplace_back(event, pressed);
+}
+void CIVZH_DrainKeys() {
+	std::deque<std::pair<CEvent*, bool>> pending;
+	{
+		std::lock_guard<std::mutex> lock(civzh_key_mutex);
+		pending.swap(civzh_key_queue);
+	}
+	for (auto &item : pending) item.first->Active(item.second);
+}
+
 class Typer {
 	public:
 		Typer() = default;
@@ -803,6 +823,31 @@ class Typer {
 						return;
 					std::this_thread::sleep_for(std::chrono::milliseconds(m_pace_ms));
 				// Otherwise trigger the matching button if we have one
+				} else if (button.size() > 1 && button.find('+') != std::string::npos) {
+					// civ-zh harness: "lalt+c" holds every part, then releases in reverse
+					std::vector<CEvent*> held;
+					size_t start = 0;
+					found = true;
+					while (start <= button.size()) {
+						size_t plus = button.find('+', start);
+						if (plus == std::string::npos) plus = button.size();
+						const std::string part_name = "key_" + button.substr(start, plus - start);
+						CEvent *match = nullptr;
+						for (auto &event : *m_events)
+							if (part_name == event->GetName()) { match = event; break; }
+						if (!match) { found = false; break; }
+						held.push_back(match);
+						start = plus + 1;
+					}
+					if (found) {
+						for (auto *event : held) {
+							CIVZH_QueueKey(event, true);
+							std::this_thread::sleep_for(std::chrono::milliseconds(30));
+						}
+						std::this_thread::sleep_for(std::chrono::milliseconds(50));
+						for (auto it = held.rbegin(); it != held.rend(); ++it)
+							CIVZH_QueueKey((*it), false);
+					}
 				} else {
 					const auto is_cap = button.length() == 1 && isupper(button[0]);
 					const auto maybe_lshift = is_cap ? GetLShiftEvent() : nullptr;
@@ -811,11 +856,11 @@ class Typer {
 					for (auto &event : *m_events) {
 						if (bind_name == event->GetName()) {
 							found = true;
-							if (maybe_lshift) maybe_lshift->Active(true);
-							event->Active(true);
+							if (maybe_lshift) CIVZH_QueueKey(maybe_lshift, true);
+							CIVZH_QueueKey(event, true);
 							std::this_thread::sleep_for(std::chrono::milliseconds(50));
-							event->Active(false);
-							if (maybe_lshift) maybe_lshift->Active(false);
+							CIVZH_QueueKey(event, false);
+							if (maybe_lshift) CIVZH_QueueKey(maybe_lshift, false);
 							break;
 						}
 					}

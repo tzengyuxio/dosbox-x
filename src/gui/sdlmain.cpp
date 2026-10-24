@@ -5893,6 +5893,69 @@ bool gfx_in_mapper = false;
 #define DB_POLLSKIP 1
 #endif
 
+/* civ-zh test harness: poll a FIFO named by DOSBOX_CTL for automation commands.
+ *   shot                         take a raw screenshot (captures dir)
+ *   type WAIT_MS PACE_MS keys... queue AUTOTYPE key names
+ */
+#include <fcntl.h>
+#include <unistd.h>
+void CAPTURE_RawScreenShotEvent(bool pressed);
+void CAPTURE_ScreenShotEvent(bool pressed);
+void CAPTURE_VideoStart();
+void CAPTURE_VideoStop();
+void MAPPER_AutoType(std::vector<std::string> &sequence, const uint32_t wait_ms, const uint32_t pace_ms, bool choice);
+static void CIVZH_PollControl() {
+    static int fd = -2;
+    static std::string pending;
+    if (fd == -2) {
+        const char *path = getenv("DOSBOX_CTL");
+        fd = path ? open(path, O_RDWR | O_NONBLOCK) : -1;
+    }
+    if (fd < 0) return;
+    void CIVZH_DrainKeys();
+    CIVZH_DrainKeys();
+    char buf[512];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf))) > 0) pending.append(buf, (size_t)n);
+    size_t eol;
+    while ((eol = pending.find('\n')) != std::string::npos) {
+        std::string line = pending.substr(0, eol);
+        pending.erase(0, eol + 1);
+        std::vector<std::string> words;
+        size_t i = 0;
+        while (i < line.size()) {
+            size_t j = line.find(' ', i);
+            if (j == std::string::npos) j = line.size();
+            if (j > i) words.push_back(line.substr(i, j - i));
+            i = j + 1;
+        }
+        if (words.empty()) continue;
+        fprintf(stderr, "CIVZH: %s\n", line.c_str());
+        if (words[0] == "shot") {
+            CAPTURE_RawScreenShotEvent(true);
+        } else if (words[0] == "shot2") {
+            CAPTURE_ScreenShotEvent(true);
+        } else if (words[0] == "vidstart") {
+            CAPTURE_VideoStart();
+        } else if (words[0] == "vidstop") {
+            CAPTURE_VideoStop();
+        } else if (words[0] == "type" && words.size() > 3) {
+            uint32_t wait_ms = (uint32_t)atoi(words[1].c_str());
+            uint32_t pace_ms = (uint32_t)atoi(words[2].c_str());
+            std::vector<std::string> keys(words.begin() + 3, words.end());
+            MAPPER_AutoType(keys, wait_ms, pace_ms, false);
+        } else if (words[0] == "move" && words.size() > 2) {
+            /* INT 33h driver coordinates */
+            void CIVZH_MouseSet(float x, float y);
+            CIVZH_MouseSet((float)atof(words[1].c_str()), (float)atof(words[2].c_str()));
+        } else if (words[0] == "press") {
+            Mouse_ButtonPressed(words.size() > 1 ? (uint8_t)atoi(words[1].c_str()) : 0);
+        } else if (words[0] == "release") {
+            Mouse_ButtonReleased(words.size() > 1 ? (uint8_t)atoi(words[1].c_str()) : 0);
+        }
+    }
+}
+
 void GFX_Events() {
     CheckMapperKeyboardLayout();
 #if defined(C_SDL2) /* SDL 2.x---------------------------------- */
@@ -5937,6 +6000,7 @@ void GFX_Events() {
 #endif
 
     GFX_EventsMouse();
+    CIVZH_PollControl();
 
 #if C_EMSCRIPTEN
     emscripten_sleep(0);
@@ -6365,6 +6429,7 @@ void GFX_Events() {
 #endif
 
     GFX_EventsMouse();
+    CIVZH_PollControl();
 
 #if C_EMSCRIPTEN
     emscripten_sleep(0);

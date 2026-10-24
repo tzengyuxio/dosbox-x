@@ -1238,6 +1238,14 @@ void Mouse_Select(int x1, int y1, int x2, int y2, int w, int h, bool select) {
 }
 #endif
 
+/* civ-zh harness: place the cursor at INT 33h coordinates. */
+void CIVZH_MouseSet(float x,float y) {
+    Mouse_CursorMoved(0.0f,0.0f,0.0f,0.0f,true);
+    mouse.x = x;
+    mouse.y = y;
+    fprintf(stderr,"CIVZH mouse %g,%g range %d..%d,%d..%d\n",mouse.x,mouse.y,mouse.min_x,mouse.max_x,mouse.min_y,mouse.max_y);
+}
+
 void Mouse_ButtonPressed(uint8_t button) {
     if (!IS_PC98_ARCH && KEYBOARD_AUX_Active()) {
         switch (button) {
