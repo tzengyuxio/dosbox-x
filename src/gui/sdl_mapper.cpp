@@ -3755,6 +3755,16 @@ bool MAPPER_DemoOnly(void) {
     return !mapper.exit;
 }
 
+CEvent *get_mapper_event_by_name(const std::string &x);
+
+/* Press or release a mapper event (e.g. "key_a") as if its bound key were used. */
+bool MAPPER_SetEventActive(const std::string &name, bool pressed) {
+    CEvent *event = get_mapper_event_by_name(name);
+    if (event == NULL) return false;
+    event->Active(pressed);
+    return true;
+}
+
 CEvent *get_mapper_event_by_name(const std::string &x) {
     auto i = name_to_events.find(x);
 

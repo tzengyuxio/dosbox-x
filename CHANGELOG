@@ -1,4 +1,10 @@
 Next version:
+  - Debugger: added commands to drive the guest from the debugger prompt or
+    the mcp_server control channel (EXEC): KEY key[+key...] [ms] presses mapper
+    keys and releases them after ms of emulated time (a PIC event, not a
+    thread), KEYDOWN/KEYUP hold or release them, MOUSEMOVE x y places the
+    cursor at INT 33h coordinates, MOUSEBUTTON n DOWN|UP, SCREENSHOT [RAW] and
+    VIDEOCAPTURE START|STOP. (tzengyuxio)
   - PC-98: INT 18h AH=1Bh (set KCG access mode, AL=0 code, AL=1 dot) is now
     handled instead of being logged as an unknown call. It sets the same
     dot access mode as port 68h commands 0Ah/0Bh and bit 3 of AH=0Ah, and

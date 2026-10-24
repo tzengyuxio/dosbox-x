@@ -1214,6 +1214,13 @@ void Mouse_Select(int x1, int y1, int x2, int y2, int w, int h, bool select) {
 }
 #endif
 
+/* Place the cursor at INT 33h driver coordinates, clamped to the driver range. */
+void Mouse_SetPosition(float x,float y) {
+    Mouse_CursorMoved(0.0f,0.0f,0.0f,0.0f,true);
+    mouse.x = std::max((float)mouse.min_x, std::min((float)mouse.max_x, x));
+    mouse.y = std::max((float)mouse.min_y, std::min((float)mouse.max_y, y));
+}
+
 void Mouse_ButtonPressed(uint8_t button) {
     if (!IS_PC98_ARCH && KEYBOARD_AUX_Active()) {
         switch (button) {

@@ -63,6 +63,8 @@ using namespace std;
 #include "control.h"
 
 #include "debug_mcp.h"
+#include "hardware.h"
+#include "mouse.h"
 
 bool Clear_SYSENTER_Debug();
 bool Toggle_BreakSYSEnter();
@@ -2193,6 +2195,36 @@ static bool ParseMemoryDumpArguments(char *&found, uint16_t &seg, uint32_t &ofs,
 	return true;
 }
 
+class CEvent;
+CEvent *get_mapper_event_by_name(const std::string &x);
+
+/* Input injection for KEY: chords waiting for their timed release. */
+static std::map<Bitu, std::vector<std::string> > debug_held_keys;
+static Bitu debug_held_keys_next = 0;
+
+static std::vector<std::string> DEBUG_KeyNames(const std::string &arg) {
+	std::vector<std::string> names;
+	std::string::size_type start = 0;
+	while (start <= arg.size()) {
+		std::string::size_type plus = arg.find('+', start);
+		if (plus == std::string::npos) plus = arg.size();
+		std::string name = arg.substr(start, plus - start);
+		for (auto &c : name) c = (char)tolower((unsigned char)c);
+		if (name.compare(0, 4, "key_") != 0) name = "key_" + name;
+		names.push_back(name);
+		start = plus + 1;
+	}
+	return names;
+}
+
+static void DEBUG_ReleaseHeldKeys(Bitu val) {
+	auto it = debug_held_keys.find(val);
+	if (it == debug_held_keys.end()) return;
+	for (auto name = it->second.rbegin(); name != it->second.rend(); ++name)
+		MAPPER_SetEventActive(*name, false);
+	debug_held_keys.erase(it);
+}
+
 bool ParseCommand(char* str) {
     std::string copy_str = str;
     for (auto &c : copy_str) c = toupper(c);
@@ -2897,6 +2929,80 @@ bool ParseCommand(char* str) {
 			// delete single breakpoint
 			DEBUG_ShowMsg("DEBUG: Breakpoint deletion %s.\n",(CBreakpoint::DeleteByIndex(bpNr)?"success":"failure"));
 		}
+		return true;
+	}
+
+	if (command == "KEY" || command == "KEYDOWN" || command == "KEYUP") { // Inject mapper key events
+		std::istringstream args(found);
+		std::string keys;
+		unsigned int hold_ms = 50;
+		args >> keys >> hold_ms;
+		if (keys.empty()) {
+			DEBUG_ShowMsg("%s needs a key name such as A, ENTER or LALT+W.\n",command.c_str());
+			return true;
+		}
+		const std::vector<std::string> names = DEBUG_KeyNames(keys);
+		for (const auto &name : names) {
+			if (get_mapper_event_by_name(name) == NULL) {
+				DEBUG_ShowMsg("No mapper event named %s.\n",name.c_str());
+				return true;
+			}
+		}
+		if (command == "KEYUP") {
+			for (auto name = names.rbegin(); name != names.rend(); ++name)
+				MAPPER_SetEventActive(*name, false);
+		} else {
+			for (const auto &name : names) MAPPER_SetEventActive(name, true);
+			if (command == "KEY") {
+				const Bitu id = debug_held_keys_next++;
+				debug_held_keys[id] = names;
+				PIC_AddEvent(DEBUG_ReleaseHeldKeys, (pic_tickindex_t)hold_ms, id);
+			}
+		}
+		DEBUG_ShowMsg("%s %s\n",command.c_str(),keys.c_str());
+		return true;
+	}
+
+	if (command == "MOUSEMOVE") { // Place the mouse cursor (INT 33h coordinates)
+		std::istringstream args(found);
+		float x, y;
+		if (!(args >> x >> y)) {
+			DEBUG_ShowMsg("MOUSEMOVE needs x y.\n");
+			return true;
+		}
+		Mouse_SetPosition(x, y);
+		DEBUG_ShowMsg("MOUSEMOVE %g %g\n",x,y);
+		return true;
+	}
+
+	if (command == "MOUSEBUTTON") { // Press or release a mouse button
+		std::istringstream args(found);
+		unsigned int button = 0;
+		std::string state;
+		args >> button >> state;
+		if (button > 2 || (state != "DOWN" && state != "UP")) {
+			DEBUG_ShowMsg("MOUSEBUTTON needs a button (0-2) and DOWN or UP.\n");
+			return true;
+		}
+		if (state == "DOWN") Mouse_ButtonPressed((uint8_t)button);
+		else Mouse_ButtonReleased((uint8_t)button);
+		DEBUG_ShowMsg("MOUSEBUTTON %u %s\n",button,state.c_str());
+		return true;
+	}
+
+	if (command == "SCREENSHOT") { // Save a screenshot to the capture folder
+		SkipSpace(found);
+		if (!strcmp(found, "RAW")) CAPTURE_RawScreenShotEvent(true);
+		else CAPTURE_ScreenShotEvent(true);
+		DEBUG_ShowMsg("SCREENSHOT requested.\n");
+		return true;
+	}
+
+	if (command == "VIDEOCAPTURE") { // Start or stop video capture
+		SkipSpace(found);
+		if (!strcmp(found, "START")) CAPTURE_VideoStart();
+		else if (!strcmp(found, "STOP")) CAPTURE_VideoStop();
+		else DEBUG_ShowMsg("VIDEOCAPTURE needs START or STOP.\n");
 		return true;
 	}
 
@@ -4408,6 +4514,13 @@ bool ParseCommand(char* str) {
 
 		DEBUG_ShowMsg("IN[P|W|D] [port]          - I/O port read byte/word/dword.\n");
 		DEBUG_ShowMsg("OUT[P|W|D] [port] [data]  - I/O port write byte/word/dword.\n");
+
+		DEBUG_ShowMsg("KEY key[+key...] [ms]     - Press keys (mapper names, e.g. ENTER, LALT+W), release after ms (50).\n");
+		DEBUG_ShowMsg("KEYDOWN/KEYUP key[+key..] - Press or release keys without a timed release.\n");
+		DEBUG_ShowMsg("MOUSEMOVE x y             - Move the mouse cursor to INT 33h coordinates.\n");
+		DEBUG_ShowMsg("MOUSEBUTTON n DOWN|UP     - Press or release mouse button n (0=left, 1=right, 2=middle).\n");
+		DEBUG_ShowMsg("SCREENSHOT [RAW]          - Save a screenshot (RAW: unscaled) to the capture folder.\n");
+		DEBUG_ShowMsg("VIDEOCAPTURE START|STOP   - Start or stop video capture.\n");
 
 		DEBUG_ShowMsg("HELP                      - Help\n");
 		DEBUG_ShowMsg("Keys------------------------------------------------\n");

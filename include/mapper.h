@@ -38,6 +38,7 @@ void MAPPER_AddHandler(MAPPER_Handler * handler,MapKeys key,Bitu mods,char const
 void MAPPER_Init(void);
 void MAPPER_StartUp();
 void MAPPER_Run(bool pressed);
+bool MAPPER_SetEventActive(const std::string &name, bool pressed);
 void MAPPER_RunEvent(Bitu);
 void MAPPER_RunInternal();
 void MAPPER_LosingFocus(void);
