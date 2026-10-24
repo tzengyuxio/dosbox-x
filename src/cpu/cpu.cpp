@@ -1199,7 +1199,22 @@ void CPU_Exception(Bitu which,Bitu error ) {
 }
 
 uint8_t lastint;
+
+/* CIVZH: ring buffer of far control transfers for crash diagnosis. */
+struct civzh_xfer { char kind; uint16_t cs, ip, sp, to_cs, to_ip; };
+civzh_xfer civzh_ring[64]; unsigned civzh_pos = 0;
+static inline void civzh_note(char kind, uint32_t oldeip, uint16_t to_cs, uint16_t to_ip) {
+	civzh_xfer &x = civzh_ring[civzh_pos++ & 63];
+	x.kind = kind; x.cs = SegValue(cs); x.ip = (uint16_t)oldeip; x.sp = reg_sp; x.to_cs = to_cs; x.to_ip = to_ip;
+}
+void civzh_dump(void) {
+	for (unsigned i = civzh_pos - 64; i != civzh_pos; i++) {
+		civzh_xfer &x = civzh_ring[i & 63];
+		LOG_MSG("CIVZH: %c %04X:%04X sp=%04X -> %04X:%04X", x.kind ? x.kind : '?', x.cs, x.ip, x.sp, x.to_cs, x.to_ip);
+	}
+}
 void CPU_Interrupt(Bitu num,Bitu type,uint32_t oldeip) {
+	if (!cpu.pmode) civzh_note('I', oldeip, (uint16_t)num, 0);
     if (num == EXCEPTION_DB && (type&CPU_INT_EXCEPTION) == 0) {
       CPU_DebugException(0,oldeip); // DR6 bits need updating
       return;
@@ -1509,6 +1524,7 @@ do_interrupt:
  *      Make sure this code emulates that bug. Some buggy games might rely on that. */
 
 void CPU_IRET(bool use32,uint32_t oldeip) {
+	if (!cpu.pmode) civzh_note('R', oldeip, mem_readw(SegPhys(ss)+reg_sp+2), mem_readw(SegPhys(ss)+reg_sp));
 	uint32_t orig_esp = reg_esp;
 
 	/* x86 CPUs consider IRET the completion of an NMI, no matter where it happens */
@@ -1785,6 +1801,7 @@ void CPU_IRET(bool use32,uint32_t oldeip) {
 
 
 void CPU_JMP(bool use32,Bitu selector,Bitu offset,uint32_t oldeip) {
+	if (!cpu.pmode) civzh_note('J', oldeip, (uint16_t)selector, (uint16_t)offset);
 	if (!cpu.pmode || (reg_flags & FLAG_VM)) {
 		if (!use32) {
 			reg_eip=offset&0xffff;
@@ -1920,6 +1937,7 @@ CODE_jmp:
 
 
 void CPU_CALL(bool use32,Bitu selector,Bitu offset,uint32_t oldeip) {
+	if (!cpu.pmode) civzh_note('C', oldeip, (uint16_t)selector, (uint16_t)offset);
 	uint32_t old_esp = reg_esp;
 	uint32_t old_eip = reg_eip;
 
@@ -2210,6 +2228,7 @@ call_code:
 
 
 void CPU_RET(bool use32,Bitu bytes,uint32_t oldeip) {
+	if (!cpu.pmode) civzh_note('F', oldeip, mem_readw(SegPhys(ss)+reg_sp+2), mem_readw(SegPhys(ss)+reg_sp));
     (void)oldeip;//UNUSED
 
 	uint32_t orig_esp = reg_esp;

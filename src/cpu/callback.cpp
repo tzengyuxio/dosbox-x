@@ -158,8 +158,21 @@ void CALLBACK_IdleNoInts(void) {
 	}
 }
 
+void civzh_dump(void);
 static Bitu default_handler(void) {
 	LOG(LOG_CPU,LOG_ERROR)("Illegal Unhandled Interrupt Called %X",lastint);
+	{ static int civzh_seen = 0; if (civzh_seen++ < 3) {
+		PhysPt sp = SegPhys(ss) + reg_sp;
+		LOG_MSG("CIVZH: int %X from %04X:%04X ds=%04X ss=%04X sp=%04X",
+			(unsigned)lastint, mem_readw(sp + 2), mem_readw(sp), SegValue(ds), SegValue(ss), reg_sp);
+		LOG_MSG("CIVZH: ax=%04X bx=%04X cx=%04X dx=%04X si=%04X di=%04X bp=%04X es=%04X",
+			reg_ax, reg_bx, reg_cx, reg_dx, reg_si, reg_di, reg_bp, SegValue(es));
+		for (int row = 0; row < 8; row++) {
+			char line[128]; int n = 0;
+			for (int k = 0; k < 8; k++) n += snprintf(line + n, sizeof line - n, " %04X", mem_readw(sp + (row * 8 + k) * 2));
+			LOG_MSG("CIVZH: stack+%02X:%s", row * 16, line);
+		}
+		if (civzh_seen == 1) civzh_dump(); } }
 	return CBRET_NONE;
 }
 
